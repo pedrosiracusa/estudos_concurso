@@ -1,7 +1,7 @@
 
 # coding: utf-8
 
-# In[1]:
+# In[2]:
 
 
 import gspread
@@ -11,14 +11,14 @@ from datetime import timedelta
 from datetime import datetime
 
 
-# In[2]:
+# In[3]:
 
 
 spreadsheet_name = "controle"
 credentialsFile_path = "./credentials.json"
 
 
-# In[187]:
+# In[4]:
 
 
 # Google Drive Authentication
@@ -27,7 +27,7 @@ credentials = ServiceAccountCredentials.from_json_keyfile_name(credentialsFile_p
 gc = gspread.authorize(credentials)
 
 
-# In[54]:
+# In[5]:
 
 
 # GLobals
@@ -35,21 +35,23 @@ gc = gspread.authorize(credentials)
 # Default step factor to use
 STEP_FACTOR = 3
 
-COLS_TO_UPDATE = ['LAST_REVISION','STEP'] 
+COLS_TO_UPDATE = ['REVISADO'] 
 
 
 # ## Importing the worksheet into a dataframe
 
-# In[204]:
+# In[6]:
 
 
 def worksheetToDf(worksheet):
     df = pd.DataFrame.from_records(worksheet.get_all_values())
+    df.drop( df[df[1]==''].index,inplace=True )
     df.columns = df.loc[0]
     df.reindex(df.drop(0,inplace=True))
     df.loc[ df['STEP_FACTOR']=='', 'STEP_FACTOR' ] = STEP_FACTOR
 
     df['LAST_REVISION'] = pd.to_datetime(df['LAST_REVISION'])
+    df['REVISADO'] = df['REVISADO'].astype(int)
     df['STEP_FACTOR']= df['STEP_FACTOR'].astype(int)
     df['STEP'] = df['STEP'].astype(int)
     return df
@@ -57,7 +59,7 @@ def worksheetToDf(worksheet):
 
 # ## Updating the worksheet using the dataframe
 
-# In[174]:
+# In[7]:
 
 
 def getCellsFromColumn(df,worksheet,colname):
@@ -79,62 +81,36 @@ def updateCells(df, worksheet, colname, inplace=False):
     return cells_list
 
 def updateWorksheet(df,worksheet,columns=COLS_TO_UPDATE):
-    df['LAST_REVISION'] = df['LAST_REVISION'].astype(str)
     for col in columns:
         updateCells(df,worksheet,colname=col,inplace=True)
 
 
 # ---
 
-# In[7]:
+# ## Assembling new revision session
+
+# In[8]:
 
 
-def getNextRevision(df, inplace=False):
+def appendNextRevision(df):
     next_revisions = df[['LAST_REVISION','STEP']].apply(lambda df: df['LAST_REVISION'] + timedelta(days=int(df['STEP'])), axis=1)
-    if inplace:
-        df['NEXT_REVISION'] = next_revisions
-    else:
-        return next_revisions
+    df['NEXT_REVISION'] = next_revisions
+    return df
     
 def isDue(df):
     currentDate = datetime.now().date()
     return df['NEXT_REVISION'] <= datetime.now()
 
 
-# In[86]:
-
-
-def updateStep(df, inplace=False):
-    max_step = 30
-    updated_steps = df[['STEP','STEP_FACTOR']].apply(lambda df: min( int(df['STEP'])*int(df['STEP_FACTOR']), max_step ) , axis=1)
-    if inplace:
-        df['STEP'] = updated_steps
-    else:
-        return updated_steps
-    
-def updateLastRevision(df,date=None):
-    if date is None:
-        date = pd.datetime.now().date().isoformat()
-        
-    df['LAST_REVISION'] = pd.to_datetime(date)
-
-
-# ---
-
-# In[141]:
+# In[9]:
 
 
 def getRevisionSession(df, num_blocks=3):
-    getNextRevision(df_revisoes, inplace=True)
+    appendNextRevision(df)
     return df.loc[ isDue(df) ].sort_values(by='NEXT_REVISION')[:num_blocks]
 
-
-# In[142]:
-
-
 def commitRevisionSession(df,rs, worksheetToUpdate=None):
-    updateStep(rs,inplace=True)
-    updateLastRevision(rs)
+    rs['REVISADO'] = 0
     df.update(rs)
     if worksheetToUpdate:
         updateWorksheet(df,worksheetToUpdate)
@@ -153,12 +129,11 @@ if __name__=='__main__':
 
     df_revisoes = worksheetToDf(wsh_revisoes)
     rs = getRevisionSession(df_revisoes, num_blocks = 3)
-    print("Aqui está sua sessão de revisão:")
-    print(rs[['MATERIA','MATERIAL','LAST_REVISION']])
-    
-    if input("Posso confirmar? (y/n)")=='y':
-        commitRevisionSession(df_revisoes, rs, worksheetToUpdate=wsh_revisoes)
-        print("A tabela foi atualizada")
+    if rs.shape[0]==0:
+        print("Não há revisões a fazer")
     else:
-        print("Ok... não atualizei a tabela")
+        commitRevisionSession(df_revisoes, rs, worksheetToUpdate=wsh_revisoes)
+        print("Sua sessão de revisão foi atualizada.")
+        print("Aqui estão as matérias:")
+        print(rs[['MATERIA','MATERIAL']])
 

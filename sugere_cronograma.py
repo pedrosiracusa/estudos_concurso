@@ -3,6 +3,7 @@ import gspread
 from pandas import DataFrame, to_numeric
 from numpy import random
 from oauth2client.service_account import ServiceAccountCredentials
+from gerencia_revisao import worksheetToDf, getRevisionSession, commitRevisionSession
 
 
 spreadsheet_name = "controle"
@@ -20,13 +21,16 @@ gc = gspread.authorize(credentials)
 
 # Reading data from spreadsheet
 sprsh = gc.open(spreadsheet_name)
-wsh_materias = sprsh.get_worksheet(1)
+wsh_materias = sprsh.worksheet('materias_pesos')
+wsh_revisoes = sprsh.worksheet('revisoes')
 
 df_materias = DataFrame.from_records(wsh_materias.get_all_values())
 df_materias.columns = df_materias.loc[0]
 df_materias.reindex(df_materias.drop(0,inplace=True))
 df_materias.set_index(['nome'],inplace=True)
 df_materias = df_materias.apply(lambda df: to_numeric(df,errors='ignore')) 
+
+df_revisoes = worksheetToDf(wsh_revisoes)
 
 
 # Store data in a dict `materias` and use it to calculate scores and suggest
@@ -106,5 +110,17 @@ print("============================")
 
 suggested = suggestMaterias(scores_normalized).items()
 print("".join([ f"\n\t{m} ({format_hours(h)})" for m,h in suggested]))
+
+
+print("\nRevisões:")
+print("============================")
+rs = getRevisionSession(df_revisoes,num_blocks=3)
+if rs.shape[0]==0:
+    print("Não há revisões a fazer")
+else:
+    commitRevisionSession(df_revisoes, rs, worksheetToUpdate=wsh_revisoes)
+    print("Sua sessão de revisão foi atualizada")
+    print("Aqui estão as matérias a revisar:")
+    print(rs[['MATERIA','MATERIAL']])
 
 input("\nPressione ENTER para terminar")
